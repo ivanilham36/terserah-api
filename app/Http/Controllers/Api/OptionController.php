@@ -12,6 +12,13 @@ class OptionController extends Controller
     {
         $query = Option::query()->withAvg('reviews', 'rating')->withCount('reviews');
 
+        // "Tempat saya": yang saya buat atau pernah jadi kandidat di ruang saya
+        if ($request->query('scope') === 'mine') {
+            $uid = auth('api')->id();
+            $query->where(function ($q) use ($uid) {
+                $q->where('created_by', $uid)->orWhereHas('rooms', fn ($r) => $r->whereHas('members', fn ($m) => $m->where('users.id', $uid)));
+            });
+        }
         if ($request->filled('category')) {
             $query->where('category', $request->category);
         }

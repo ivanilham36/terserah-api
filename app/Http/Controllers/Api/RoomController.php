@@ -68,6 +68,33 @@ class RoomController extends Controller
         return response()->json($room);
     }
 
+    // Hanya pemilik: hapus ruang beserta anggota, kandidat, dan suara (cascade)
+    public function destroy(Room $room)
+    {
+        if ($room->owner_id !== auth('api')->id()) {
+            return response()->json(['message' => 'Hanya pemilik ruang yang bisa menghapus'], 403);
+        }
+
+        $room->delete();
+
+        return response()->json(['message' => 'Ruang dihapus']);
+    }
+
+    // Anggota (bukan pemilik) keluar dari ruang; suaranya ikut dihapus
+    public function leave(Room $room)
+    {
+        $this->ensureMember($room);
+
+        if ($room->owner_id === auth('api')->id()) {
+            return response()->json(['message' => 'Pemilik tidak bisa keluar, hapus ruangnya saja'], 422);
+        }
+
+        Vote::where('room_id', $room->id)->where('user_id', auth('api')->id())->delete();
+        $room->members()->detach(auth('api')->id());
+
+        return response()->json(['message' => 'Kamu keluar dari ruang']);
+    }
+
     public function updateMe(Request $request, Room $room, AiService $ai)
     {
         $this->ensureMember($room);

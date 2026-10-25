@@ -104,6 +104,13 @@ Koleksi Postman ada di `docs/Terserah.postman_collection.json` (Import di Postma
 | GET | /api/rooms/{id}/recommendations | Ranking dan rincian skor |
 | POST | /api/rooms/{id}/decide | Tetapkan keputusan (pemilik ruang) |
 | POST | /api/rooms/{id}/ai/suggest | Ide opsi dari AI |
+| DELETE | /api/rooms/{id} | Hapus ruang (pemilik) |
+| DELETE | /api/rooms/{id}/members/me | Keluar dari ruang (anggota) |
+| POST | /api/auth/forgot-password | Kirim kode reset 6 digit ke email |
+| POST | /api/auth/reset-password | Ganti password dengan kode (email, code, password) |
+| GET | /api/places/search?lat&lng&category&radius atau ?area=nama | Cari tempat nyata (OpenStreetMap) |
+| POST | /api/rooms/{id}/places | Jadikan tempat nyata sebagai kandidat |
+| GET | /api/options?scope=mine | Tempat yang pernah saya pakai |
 
 ## Cara kerja skor
 
@@ -128,3 +135,15 @@ tests/Feature              Tes otomatis
 docs                       Koleksi Postman
 ```
 
+
+
+## Tempat nyata (OpenStreetMap)
+
+`GET /api/places/search` memakai Overpass API dan Nominatim (gratis, tanpa API key). Data OSM tidak punya rating,
+jadi rating berasal dari ulasan pengguna aplikasi ini, sedangkan kecocokan preferensi dibaca dari tag nyata
+(masakan, halal, wifi, AC, tempat duduk luar). Hasil di-cache 15 menit dan server cadangan dicoba bila yang utama sibuk.
+
+## Email (lupa password)
+
+Kode reset dikirim lewat email. Isi `MAIL_*` di `.env` (SMTP apa saja, mis. Gmail dengan App Password atau Brevo).
+Selama `MAIL_MAILER=log`, kode hanya ditulis ke `storage/logs/laravel.log` (cukup untuk pengembangan lokal).

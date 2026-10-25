@@ -218,4 +218,19 @@ class PlaceAndRoomDeleteTest extends TestCase
 
         $this->actingAs($u, 'api')->getJson('/api/places/search?area=Kemang&category=kopi')->assertOk()->assertJsonPath('center.name', 'Kemang, Jakarta');
     }
+
+    public function test_tags_are_translated_and_keyword_filters_results(): void
+    {
+        Http::fake(['*overpass*' => Http::response(['elements' => [
+            ['type' => 'node', 'id' => 1, 'lat' => -6.2, 'lon' => 106.8, 'tags' => ['name' => 'Mie Ayam Pak Joko', 'amenity' => 'restaurant', 'cuisine' => 'noodle;chicken']],
+            ['type' => 'node', 'id' => 2, 'lat' => -6.2, 'lon' => 106.8, 'tags' => ['name' => 'Pizza Hut', 'amenity' => 'fast_food', 'cuisine' => 'pizza']],
+        ]])]);
+        $u = User::factory()->create();
+
+        $res = $this->actingAs($u, 'api')->getJson('/api/places/search?lat=-6.2&lng=106.8&category=makanan&q=mie ayam')->assertOk();
+
+        $this->assertCount(1, $res->json('places'));
+        $this->assertSame(['mie', 'ayam'], $res->json('places.0.tags'));
+        $this->assertSame('restoran', $res->json('places.0.category'));
+    }
 }

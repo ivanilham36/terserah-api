@@ -64,6 +64,27 @@ class PlaceService
 
     private const GEO_DEFAULT = ['catering.restaurant', 'catering.fast_food', 'catering.cafe'];
 
+    // terjemahan tag masakan/jenis tempat OSM ke bahasa Indonesia
+    private const ID_WORDS = [
+        'indonesian' => 'indonesia', 'javanese' => 'jawa', 'sundanese' => 'sunda', 'padang' => 'padang', 'chinese' => 'chinese',
+        'japanese' => 'jepang', 'korean' => 'korea', 'indian' => 'india', 'thai' => 'thailand', 'western' => 'barat',
+        'italian' => 'italia', 'american' => 'amerika', 'asian' => 'asia', 'international' => 'internasional',
+        'middle eastern' => 'timur tengah', 'mediterranean' => 'mediterania', 'arab' => 'arab', 'vietnamese' => 'vietnam',
+        'noodle' => 'mie', 'noodles' => 'mie', 'chicken' => 'ayam', 'fried chicken' => 'ayam goreng', 'rice' => 'nasi',
+        'fried rice' => 'nasi goreng', 'satay' => 'sate', 'soup' => 'sup', 'fish' => 'ikan', 'seafood' => 'seafood',
+        'coffee shop' => 'kedai kopi', 'coffee' => 'kopi', 'tea' => 'teh', 'bubble tea' => 'boba', 'ice cream' => 'es krim',
+        'dessert' => 'pencuci mulut', 'bakery' => 'roti', 'cake' => 'kue', 'donut' => 'donat', 'waffle' => 'wafel',
+        'steak house' => 'steak', 'steak' => 'steak', 'barbecue' => 'panggang', 'bbq' => 'panggang', 'grill' => 'panggang',
+        'breakfast' => 'sarapan', 'fast food' => 'cepat saji', 'regional' => 'masakan daerah', 'vegetarian' => 'vegetarian',
+        'vegan' => 'vegan', 'burger' => 'burger', 'pizza' => 'pizza', 'sandwich' => 'sandwich', 'sushi' => 'sushi',
+        'ramen' => 'ramen', 'kebab' => 'kebab', 'pasta' => 'pasta', 'salad' => 'salad', 'juice' => 'jus', 'bar' => 'bar',
+        'restaurant' => 'restoran', 'cafe' => 'kafe', 'food court' => 'pujasera', 'cinema' => 'bioskop',
+        'museum' => 'museum', 'park' => 'taman', 'zoo' => 'kebun binatang', 'hotel' => 'hotel', 'guest house' => 'penginapan',
+        'attraction' => 'objek wisata', 'viewpoint' => 'titik pandang', 'theme park' => 'taman hiburan',
+        'mall' => 'mal', 'supermarket' => 'supermarket', 'gift' => 'toko oleh-oleh', 'books' => 'toko buku',
+        'fitness centre' => 'pusat kebugaran', 'sports centre' => 'pusat olahraga', 'department store' => 'toserba',
+    ];
+
     private const GEOAPIFY = 'https://api.geoapify.com';
 
     private const DEFAULT_FILTERS = [['amenity', 'restaurant'], ['amenity', 'cafe'], ['amenity', 'fast_food']];
@@ -130,8 +151,18 @@ class PlaceService
         }
 
         if ($q) {
-            $needle = mb_strtolower($q);
-            $places = array_values(array_filter($places, fn ($p) => str_contains(mb_strtolower($p['title'] . ' ' . implode(' ', $p['tags'])), $needle)));
+            // cocok bila SEMUA kata kunci ada di nama, tag, jenis, atau alamat
+            $words = preg_split('/\s+/', mb_strtolower(trim($q)), -1, PREG_SPLIT_NO_EMPTY);
+            $places = array_values(array_filter($places, function ($p) use ($words) {
+                $hay = mb_strtolower($p['title'] . ' ' . implode(' ', $p['tags']) . ' ' . $p['category'] . ' ' . ($p['address'] ?? ''));
+                foreach ($words as $w) {
+                    if (! str_contains($hay, $w)) {
+                        return false;
+                    }
+                }
+
+                return true;
+            }));
         }
 
         $places = array_slice($places, 0, $limit);
@@ -151,7 +182,7 @@ class PlaceService
             if ($this->geoKey()) {
                 try {
                     $res = Http::connectTimeout(4)->timeout(8)->get(self::GEOAPIFY . '/v1/geocode/search', [
-                        'text' => $text, 'format' => 'json', 'limit' => 1, 'lang' => 'id', 'apiKey' => $this->geoKey(),
+                        'text' => $text, 'format' => 'json', 'limit' => 1, 'lang' => 'id', 'bias' => 'countrycode:id', 'apiKey' => $this->geoKey(),
                     ]);
                     $hit = $res->successful() ? ($res->json('results.0') ?? null) : null;
                     if ($hit) {
@@ -164,7 +195,7 @@ class PlaceService
 
             try {
                 $res = Http::connectTimeout(4)->timeout(8)->withHeaders($this->headers())->get(self::NOMINATIM, [
-                    'q' => $text, 'format' => 'json', 'limit' => 1, 'accept-language' => 'id',
+                    'q' => $text, 'format' => 'json', 'limit' => 1, 'accept-language' => 'id', 'countrycodes' => 'id',
                 ]);
             } catch (\Throwable) {
                 return null;
@@ -214,7 +245,7 @@ class PlaceService
                 'categories' => implode(',', $this->geoCategoriesFor($category)),
                 'filter' => sprintf('circle:%F,%F,%d', $lng, $lat, $radius),
                 'bias' => sprintf('proximity:%F,%F', $lng, $lat),
-                'limit' => 60,
+                'limit' => 100,
                 'lang' => 'id',
                 'apiKey' => $this->geoKey(),
             ]);
@@ -267,16 +298,23 @@ class PlaceService
     {
         foreach ($categories as $c) {
             if (str_contains($c, '.')) {
-                return str_replace(['.', '_'], [' / ', ' '], $c);
+                return $this->id(substr(strrchr($c, '.'), 1));
             }
         }
 
         return 'tempat';
     }
 
+    private function id(string $word): string
+    {
+        $w = trim(str_replace('_', ' ', mb_strtolower($word)));
+
+        return self::ID_WORDS[$w] ?? $w;
+    }
+
     private function kind(array $t): string
     {
-        return $t['amenity'] ?? $t['tourism'] ?? $t['leisure'] ?? $t['shop'] ?? 'tempat';
+        return $this->id($t['amenity'] ?? $t['tourism'] ?? $t['leisure'] ?? $t['shop'] ?? 'tempat');
     }
 
     private function address(array $t): ?string
@@ -311,7 +349,7 @@ class PlaceService
             }
             $v = $t[$k];
             match ($k) {
-                'cuisine' => $tags = array_merge($tags, array_slice(array_map('trim', explode(';', str_replace('_', ' ', $v))), 0, 3)),
+                'cuisine' => $tags = array_merge($tags, array_slice(array_map(fn ($c) => $this->id($c), explode(';', $v)), 0, 3)),
                 'diet:halal' => $v === 'yes' ? $tags[] = 'halal' : null,
                 'internet_access' => in_array($v, ['wlan', 'yes', 'wifi'], true) ? $tags[] = 'wifi' : null,
                 'outdoor_seating' => $v === 'yes' ? $tags[] = 'outdoor' : null,

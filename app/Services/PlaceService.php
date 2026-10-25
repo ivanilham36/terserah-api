@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Mencari tempat nyata dari OpenStreetMap (Overpass API + Nominatim).
@@ -40,6 +41,31 @@ class PlaceService
         'taman' => [['leisure', 'park']],
     ];
 
+    // kata kunci kategori ruang -> kategori Geoapify
+    private const GEO_CATEGORIES = [
+        'kopi' => ['catering.cafe'],
+        'kafe' => ['catering.cafe'],
+        'cafe' => ['catering.cafe'],
+        'makan' => ['catering.restaurant', 'catering.fast_food', 'catering.cafe', 'catering.food_court'],
+        'resto' => ['catering.restaurant', 'catering.fast_food'],
+        'film' => ['entertainment.cinema'],
+        'bioskop' => ['entertainment.cinema'],
+        'nonton' => ['entertainment.cinema'],
+        'wisata' => ['tourism.attraction', 'tourism.sights', 'entertainment.museum', 'entertainment.zoo', 'entertainment.theme_park', 'leisure.park'],
+        'liburan' => ['tourism.attraction', 'tourism.sights', 'entertainment.museum', 'entertainment.zoo', 'entertainment.theme_park', 'leisure.park'],
+        'jalan' => ['tourism.attraction', 'leisure.park', 'commercial.shopping_mall'],
+        'hotel' => ['accommodation.hotel', 'accommodation.guest_house'],
+        'nginap' => ['accommodation.hotel', 'accommodation.guest_house'],
+        'hadiah' => ['commercial.gift_and_souvenir', 'commercial.shopping_mall', 'commercial.books'],
+        'belanja' => ['commercial.shopping_mall', 'commercial.supermarket', 'commercial.department_store'],
+        'olahraga' => ['sport.fitness', 'sport.sports_centre'],
+        'taman' => ['leisure.park'],
+    ];
+
+    private const GEO_DEFAULT = ['catering.restaurant', 'catering.fast_food', 'catering.cafe'];
+
+    private const GEOAPIFY = 'https://api.geoapify.com';
+
     private const DEFAULT_FILTERS = [['amenity', 'restaurant'], ['amenity', 'cafe'], ['amenity', 'fast_food']];
 
     public function filtersFor(string $category): array
@@ -54,6 +80,23 @@ class PlaceService
         return self::DEFAULT_FILTERS;
     }
 
+    public function geoCategoriesFor(string $category): array
+    {
+        $category = mb_strtolower($category);
+        foreach (self::GEO_CATEGORIES as $key => $cats) {
+            if (str_contains($category, $key)) {
+                return $cats;
+            }
+        }
+
+        return self::GEO_DEFAULT;
+    }
+
+    private function geoKey(): ?string
+    {
+        return config('services.geoapify.key') ?: null;
+    }
+
     public function buildQuery(array $filters, float $lat, float $lng, int $radius, int $limit): string
     {
         $parts = '';
@@ -61,7 +104,7 @@ class PlaceService
             $parts .= sprintf('nwr["%s"="%s"]["name"](around:%d,%F,%F);', $k, $v, $radius, $lat, $lng);
         }
 
-        return sprintf('[out:json][timeout:20];(%s);out center tags %d;', $parts, $limit);
+        return sprintf('[out:json][timeout:9];(%s);out center tags %d;', $parts, $limit);
     }
 
     /** @return array{places: array, error: ?string} */
@@ -74,13 +117,17 @@ class PlaceService
             return ['places' => $cached, 'error' => null];
         }
 
-        $query = $this->buildQuery($this->filtersFor($category), $lat, $lng, $radius, 80);
-        $data = $this->overpass($query);
-        if ($data === null) {
-            return ['places' => [], 'error' => 'Layanan peta (OpenStreetMap) sedang sibuk, coba lagi sebentar lagi'];
+        $places = null;
+        if ($this->geoKey()) {
+            $places = $this->geoapifySearch($lat, $lng, $category, $radius);
         }
-
-        $places = $this->normalize($data['elements'] ?? [], $lat, $lng);
+        if ($places === null) {
+            $data = $this->overpass($this->buildQuery($this->filtersFor($category), $lat, $lng, $radius, 80));
+            if ($data === null) {
+                return ['places' => [], 'error' => 'Layanan peta sedang sibuk, coba lagi sebentar lagi'];
+            }
+            $places = $this->normalize($data['elements'] ?? [], $lat, $lng);
+        }
 
         if ($q) {
             $needle = mb_strtolower($q);
@@ -101,8 +148,22 @@ class PlaceService
         $key = 'geo:' . md5(mb_strtolower($text));
 
         return Cache::remember($key, now()->addDay(), function () use ($text) {
+            if ($this->geoKey()) {
+                try {
+                    $res = Http::connectTimeout(4)->timeout(8)->get(self::GEOAPIFY . '/v1/geocode/search', [
+                        'text' => $text, 'format' => 'json', 'limit' => 1, 'lang' => 'id', 'apiKey' => $this->geoKey(),
+                    ]);
+                    $hit = $res->successful() ? ($res->json('results.0') ?? null) : null;
+                    if ($hit) {
+                        return ['lat' => (float) $hit['lat'], 'lng' => (float) $hit['lon'], 'name' => $hit['formatted'] ?? $text];
+                    }
+                } catch (\Throwable $e) {
+                    Log::warning('Geoapify geocode gagal', ['error' => $e->getMessage()]);
+                }
+            }
+
             try {
-                $res = Http::timeout(10)->withHeaders($this->headers())->get(self::NOMINATIM, [
+                $res = Http::connectTimeout(4)->timeout(8)->withHeaders($this->headers())->get(self::NOMINATIM, [
                     'q' => $text, 'format' => 'json', 'limit' => 1, 'accept-language' => 'id',
                 ]);
             } catch (\Throwable) {
@@ -143,6 +204,74 @@ class PlaceService
         usort($out, fn ($a, $b) => $a['distance_km'] <=> $b['distance_km']);
 
         return $out;
+    }
+
+    /** Cari lewat Geoapify (data OSM, ramah hosting cloud). Null bila gagal. */
+    private function geoapifySearch(float $lat, float $lng, string $category, int $radius): ?array
+    {
+        try {
+            $res = Http::connectTimeout(4)->timeout(10)->get(self::GEOAPIFY . '/v2/places', [
+                'categories' => implode(',', $this->geoCategoriesFor($category)),
+                'filter' => sprintf('circle:%F,%F,%d', $lng, $lat, $radius),
+                'bias' => sprintf('proximity:%F,%F', $lng, $lat),
+                'limit' => 60,
+                'lang' => 'id',
+                'apiKey' => $this->geoKey(),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Geoapify gagal', ['error' => $e->getMessage()]);
+
+            return null;
+        }
+
+        if (! $res->successful() || ! is_array($res->json('features'))) {
+            Log::warning('Geoapify respons tidak valid', ['status' => $res->status(), 'body' => mb_substr($res->body(), 0, 200)]);
+
+            return null;
+        }
+
+        $out = [];
+        foreach ($res->json('features') as $f) {
+            $p = $f['properties'] ?? [];
+            $raw = $p['datasource']['raw'] ?? [];
+            if (empty($p['name']) || ! isset($p['lat'], $p['lon'])) {
+                continue;
+            }
+
+            $type = ['n' => 'node', 'w' => 'way', 'r' => 'relation'][$raw['osm_type'] ?? ''] ?? null;
+            $externalId = ($type && isset($raw['osm_id']))
+                ? $type . '/' . $raw['osm_id']
+                : 'geo/' . substr(md5($p['place_id'] ?? $p['name']), 0, 20);
+
+            $out[] = [
+                'external_id' => $externalId,
+                'title' => $p['name'],
+                'category' => $this->geoKind($p['categories'] ?? []),
+                'address' => $p['address_line2'] ?? ($p['formatted'] ?? null),
+                'lat' => (float) $p['lat'],
+                'lng' => (float) $p['lon'],
+                'price_level' => $this->priceLevel($raw),
+                'tags' => $this->tags($raw),
+                'opening_hours' => $raw['opening_hours'] ?? null,
+                'website' => $raw['website'] ?? ($raw['contact:website'] ?? null),
+                'distance_km' => round($this->haversine($lat, $lng, (float) $p['lat'], (float) $p['lon']), 2),
+            ];
+        }
+
+        usort($out, fn ($a, $b) => $a['distance_km'] <=> $b['distance_km']);
+
+        return $out;
+    }
+
+    private function geoKind(array $categories): string
+    {
+        foreach ($categories as $c) {
+            if (str_contains($c, '.')) {
+                return str_replace(['.', '_'], [' / ', ' '], $c);
+            }
+        }
+
+        return 'tempat';
     }
 
     private function kind(array $t): string
@@ -199,13 +328,16 @@ class PlaceService
     {
         foreach (self::OVERPASS as $url) {
             try {
-                $res = Http::timeout(25)->withHeaders($this->headers())->asForm()->post($url, ['data' => $query]);
-            } catch (\Throwable) {
+                $res = Http::connectTimeout(4)->timeout(9)->withHeaders($this->headers())->asForm()->post($url, ['data' => $query]);
+            } catch (\Throwable $e) {
+                Log::warning('Overpass gagal', ['url' => $url, 'error' => $e->getMessage()]);
+
                 continue;
             }
             if ($res->successful() && is_array($res->json()) && isset($res->json()['elements'])) {
                 return $res->json();
             }
+            Log::warning('Overpass respons tidak valid', ['url' => $url, 'status' => $res->status()]);
         }
 
         return null;

@@ -139,7 +139,7 @@ docs                       Koleksi Postman
 
 ## Tempat nyata (OpenStreetMap)
 
-`GET /api/places/search` memakai Overpass API dan Nominatim (gratis, tanpa API key). Data OSM tidak punya rating,
+`GET /api/places/search` memakai Geoapify Places (data OpenStreetMap, API key gratis di `GEOAPIFY_API_KEY`). Tanpa key atau saat Geoapify gagal, otomatis jatuh ke Overpass API dan Nominatim (gratis, tanpa key, tetapi server publiknya sering sibuk). Data OSM tidak punya rating,
 jadi rating berasal dari ulasan pengguna aplikasi ini, sedangkan kecocokan preferensi dibaca dari tag nyata
 (masakan, halal, wifi, AC, tempat duduk luar). Hasil di-cache 15 menit dan server cadangan dicoba bila yang utama sibuk.
 

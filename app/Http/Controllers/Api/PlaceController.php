@@ -53,7 +53,7 @@ class PlaceController extends Controller
         }
 
         $d = $request->validate([
-            'external_id' => ['required', 'string', 'max:40', 'regex:/^(node|way|relation)\/\d+$/'],
+            'external_id' => ['required', 'string', 'max:40', 'regex:/^[a-z]{1,10}\/[A-Za-z0-9]+$/'],
             'title' => 'required|string|max:150',
             'category' => 'nullable|string|max:50',
             'address' => 'nullable|string|max:255',

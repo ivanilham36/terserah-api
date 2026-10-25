@@ -17,7 +17,7 @@ class PlaceAndRoomDeleteTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        config(['services.ai.key' => null]);
+        config(['services.ai.key' => null, 'services.geoapify.key' => null]);
         Cache::flush();
     }
 
@@ -166,5 +166,56 @@ class PlaceAndRoomDeleteTest extends TestCase
         $titles = collect($this->actingAs($me, 'api')->getJson('/api/options?scope=mine')->assertOk()->json('data'))->pluck('title')->all();
 
         $this->assertEqualsCanonicalizing(['Punya saya', 'Dipakai di ruang saya'], $titles);
+    }
+
+    private function geoFake(): array
+    {
+        return ['features' => [
+            ['properties' => ['name' => 'Kopi Geo Jauh', 'lat' => -6.2030, 'lon' => 106.8200, 'address_line2' => 'Jl. A, Jakarta', 'categories' => ['catering', 'catering.cafe'], 'place_id' => 'abc',
+                'datasource' => ['raw' => ['osm_type' => 'n', 'osm_id' => 555, 'internet_access' => 'wlan']]]],
+            ['properties' => ['name' => 'Warung Geo Dekat', 'lat' => -6.2002, 'lon' => 106.8162, 'categories' => ['catering.restaurant'], 'place_id' => 'def',
+                'datasource' => ['raw' => ['osm_type' => 'w', 'osm_id' => 777, 'diet:halal' => 'yes', 'cuisine' => 'indonesian']]]],
+            ['properties' => ['lat' => -6.2, 'lon' => 106.8, 'place_id' => 'noname']],
+        ]];
+    }
+
+    public function test_geoapify_is_used_when_key_is_set(): void
+    {
+        config(['services.geoapify.key' => 'k']);
+        Http::fake(['api.geoapify.com/v2/places*' => Http::response($this->geoFake())]);
+        $u = User::factory()->create();
+
+        $places = $this->actingAs($u, 'api')->getJson('/api/places/search?lat=-6.2&lng=106.816&category=makanan')->assertOk()->json('places');
+
+        $this->assertCount(2, $places);
+        $this->assertSame('Warung Geo Dekat', $places[0]['title']);
+        $this->assertSame('way/777', $places[0]['external_id']);
+        $this->assertContains('halal', $places[0]['tags']);
+        Http::assertSent(fn ($r) => str_contains($r->url(), 'categories=catering.restaurant') && str_contains($r->url(), 'filter=circle'));
+        Http::assertNotSent(fn ($r) => str_contains($r->url(), 'overpass'));
+    }
+
+    public function test_geoapify_failure_falls_back_to_overpass(): void
+    {
+        config(['services.geoapify.key' => 'k']);
+        Http::fake([
+            'api.geoapify.com/*' => Http::response(['message' => 'Quota exceeded'], 429),
+            '*overpass*' => Http::response($this->overpassFake()),
+        ]);
+        $u = User::factory()->create();
+
+        $this->actingAs($u, 'api')->getJson('/api/places/search?lat=-6.2&lng=106.816&category=makanan')->assertOk()->assertJsonCount(2, 'places');
+    }
+
+    public function test_geoapify_geocoding_for_area(): void
+    {
+        config(['services.geoapify.key' => 'k']);
+        Http::fake([
+            'api.geoapify.com/v1/geocode/*' => Http::response(['results' => [['lat' => -6.26, 'lon' => 106.81, 'formatted' => 'Kemang, Jakarta']]]),
+            'api.geoapify.com/v2/places*' => Http::response($this->geoFake()),
+        ]);
+        $u = User::factory()->create();
+
+        $this->actingAs($u, 'api')->getJson('/api/places/search?area=Kemang&category=kopi')->assertOk()->assertJsonPath('center.name', 'Kemang, Jakarta');
     }
 }

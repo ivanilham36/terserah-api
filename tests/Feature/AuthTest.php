@@ -13,7 +13,7 @@ class AuthTest extends TestCase
     public function test_register_returns_token_and_user(): void
     {
         $res = $this->postJson('/api/auth/register', [
-            'name' => 'Amy', 'email' => 'amy@test.com', 'password' => 'secret123',
+            'name' => 'Amy', 'username' => 'amy_01', 'email' => 'amy@test.com', 'password' => 'secret123',
         ]);
 
         $res->assertStatus(201)->assertJsonStructure(['token', 'token_type', 'expires_in', 'user' => ['id', 'name', 'email']]);
@@ -25,7 +25,7 @@ class AuthTest extends TestCase
         User::factory()->create(['email' => 'a@test.com']);
 
         $this->postJson('/api/auth/register', [
-            'name' => 'Lain', 'email' => 'a@test.com', 'password' => 'secret123',
+            'name' => 'Lain', 'username' => 'lain', 'email' => 'a@test.com', 'password' => 'secret123',
         ])->assertStatus(422)->assertJsonValidationErrors(['email']);
     }
 
@@ -51,5 +51,25 @@ class AuthTest extends TestCase
     public function test_me_without_token_is_unauthorized(): void
     {
         $this->getJson('/api/auth/me')->assertStatus(401);
+    }
+
+    public function test_register_rejects_bad_or_duplicate_username(): void
+    {
+        User::factory()->create(['username' => 'amy_01']);
+
+        $base = ['name' => 'X', 'email' => 'x@test.com', 'password' => 'secret123'];
+        $this->postJson('/api/auth/register', $base + ['username' => 'AMY_01'])->assertStatus(422)->assertJsonValidationErrors(['username']);
+        $this->postJson('/api/auth/register', $base + ['username' => 'a b'])->assertStatus(422)->assertJsonValidationErrors(['username']);
+        $this->postJson('/api/auth/register', $base + ['username' => 'ab'])->assertStatus(422)->assertJsonValidationErrors(['username']);
+    }
+
+    public function test_login_with_username_or_email_case_insensitive(): void
+    {
+        User::factory()->create(['username' => 'budi_x', 'email' => 'budi@test.com']);
+
+        $this->postJson('/api/auth/login', ['login' => 'Budi_X', 'password' => 'password'])->assertOk();
+        $this->postJson('/api/auth/login', ['login' => 'budi@test.com', 'password' => 'password'])->assertOk();
+        $this->postJson('/api/auth/login', ['email' => 'budi@test.com', 'password' => 'password'])->assertOk(); // kompatibel dengan klien lama
+        $this->postJson('/api/auth/login', ['login' => 'budi_x', 'password' => 'salah'])->assertStatus(401);
     }
 }

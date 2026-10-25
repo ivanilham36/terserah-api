@@ -81,7 +81,7 @@ Koleksi Postman ada di `docs/Terserah.postman_collection.json` (Import di Postma
 | Metode | Endpoint | Keterangan |
 |---|---|---|
 | POST | /api/auth/register | Daftar dan langsung dapat token |
-| POST | /api/auth/login | Login |
+| POST | /api/auth/login | Login (field `login` boleh email atau username) |
 | GET | /api/auth/me | Profil user login |
 | POST | /api/auth/refresh | Perbarui token |
 | POST | /api/auth/logout | Logout |
@@ -106,6 +106,7 @@ Koleksi Postman ada di `docs/Terserah.postman_collection.json` (Import di Postma
 | POST | /api/rooms/{id}/ai/suggest | Ide opsi dari AI |
 | DELETE | /api/rooms/{id} | Hapus ruang (pemilik) |
 | DELETE | /api/rooms/{id}/members/me | Keluar dari ruang (anggota) |
+| POST | /api/auth/google | Login/daftar dengan Google (credential); akun dengan email sama digabung |
 | POST | /api/auth/forgot-password | Kirim kode reset 6 digit ke email |
 | POST | /api/auth/reset-password | Ganti password dengan kode (email, code, password) |
 | GET | /api/places/search?lat&lng&category&radius atau ?area=nama | Cari tempat nyata (OpenStreetMap) |
@@ -147,3 +148,11 @@ jadi rating berasal dari ulasan pengguna aplikasi ini, sedangkan kecocokan prefe
 
 Kode reset dikirim lewat email. Isi `MAIL_*` di `.env` (SMTP apa saja, mis. Gmail dengan App Password atau Brevo).
 Selama `MAIL_MAILER=log`, kode hanya ditulis ke `storage/logs/laravel.log` (cukup untuk pengembangan lokal).
+
+## Login Google
+
+Isi `GOOGLE_CLIENT_ID` (OAuth client ID jenis Web dari Google Cloud Console). Token ID dari Google Identity Services
+diverifikasi ke `oauth2.googleapis.com/tokeninfo` (audience harus cocok dan email harus terverifikasi). Akun dengan
+email yang sama digabung; bila akun itu didaftarkan lewat form biasa (email belum terverifikasi), passwordnya dihapus
+supaya orang yang mendaftar duluan dengan email orang lain tidak bisa mengambil alih akun. Password bisa dipasang
+lagi lewat Lupa password.

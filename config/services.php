@@ -8,6 +8,10 @@ return [
         'models' => env('GROQ_MODELS', 'openai/gpt-oss-20b,openai/gpt-oss-120b'),
     ],
 
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+    ],
+
     'geoapify' => [
         'key' => env('GEOAPIFY_API_KEY'),
     ],

@@ -13,10 +13,10 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         // Semua data di sini FIKTIF, hanya untuk demo.
-        $admin = User::create(['name' => 'Admin', 'email' => 'admin@terserah.test', 'password' => 'password', 'role' => 'admin']);
-        $amy   = User::create(['name' => 'Amy', 'email' => 'amy@terserah.test', 'password' => 'password', 'role' => 'user']);
-        $budi  = User::create(['name' => 'Budi', 'email' => 'budi@terserah.test', 'password' => 'password', 'role' => 'user']);
-        $citra = User::create(['name' => 'Citra', 'email' => 'citra@terserah.test', 'password' => 'password', 'role' => 'user']);
+        $admin = User::create(['name' => 'Admin', 'username' => 'admin', 'email' => 'admin@terserah.test', 'password' => 'password', 'role' => 'admin']);
+        $amy   = User::create(['name' => 'Amy', 'username' => 'amy', 'email' => 'amy@terserah.test', 'password' => 'password', 'role' => 'user']);
+        $budi  = User::create(['name' => 'Budi', 'username' => 'budi', 'email' => 'budi@terserah.test', 'password' => 'password', 'role' => 'user']);
+        $citra = User::create(['name' => 'Citra', 'username' => 'citra', 'email' => 'citra@terserah.test', 'password' => 'password', 'role' => 'user']);
 
         $data = [
             ['Warung Nasi Bu Tini (fiktif)', 'makanan', 'Jl. Contoh No. 1', -6.2000, 106.8167, 1, ['murah', 'nasi', 'halal', 'santai']],
